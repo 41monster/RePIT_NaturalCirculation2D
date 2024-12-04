@@ -18,7 +18,7 @@ class TrainingConfig(BaseConfig):
     def __init__(self):
         super().__init__()
         self.batch_size: int = 10000
-        self.epochs: int = 1
+        self.epochs: int = 5
         self.learning_rate: float = 0.001
         self.device: str = "cuda" if cuda.is_available() else "cpu"
         self.optimizer = torch.optim.Adam

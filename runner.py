@@ -50,11 +50,12 @@ class Trainer:
         self.optimizer = optimizer
         self.loss_fn = loss_fn
         self.losses = {"train": [], "val": []}
+        self.best_val_accuracy = 1
 
     def train(self, train_loader:DataLoader, val_loader:DataLoader, epochs) -> bool:
         self.model.train()  # Set the model to training mode
         for epoch in range(epochs):
-            epoch_loss = 0
+            epoch_loss = list()
             for x, y in train_loader:
                 x, y = x.to(self.device), y.to(self.device)
 
@@ -67,23 +68,32 @@ class Trainer:
                 loss.backward()
                 self.optimizer.step()
 
-                epoch_loss += loss.item()
+                epoch_loss.append(loss.item())
+            
+            epoch_loss = np.mean(epoch_loss)
             
             self.losses["train"].append(epoch_loss)
             print(f"Epoch {epoch + 1}, Loss: {epoch_loss:.4f}")
+            
             # Validation loss
             val_loss = self.validate(val_loader)
+            if val_loss < self.best_val_accuracy:
+                self.best_val_accuracy = val_loss
+                self.save_model("best_model.pth")
             self.losses["val"].append(val_loss)
+        
         return True
 
     def validate(self, val_loader):
         self.model.eval()  # Set the model to evaluation mode
-        val_loss = 0
+        val_loss = list()
         with torch.no_grad():
             for x, y in val_loader:
                 x, y = x.to(self.device), y.to(self.device)
                 predictions = self.model(x)
-                val_loss += self.loss_fn(predictions, y).item()
+                val_loss.append(self.loss_fn(predictions, y).item())
+
+        val_loss = np.mean(val_loss)
         print(f"Validation Loss: {val_loss:.4f}")
         return val_loss
     
@@ -109,10 +119,10 @@ class Trainer:
                 denormed_output = FVMNDataset.denormalize(predicted_output.cpu())
                 prediction_input = prediction_input[:, ::5] + denormed_output
     
-    def save_model(self, path):
-        torch.save(self.model.state_dict(), path)
-        print(f"Model saved at {path}")
-        return path
+    def save_model(self, model_name:str):
+        torch.save(self.model.state_dict(), model_name)
+        print(f"Model saved as {model_name}")
+        return model_name
 
     def load_model(self, path) -> True:
         self.model.load_state_dict(torch.load(path, weights_only=True))
@@ -194,7 +204,7 @@ if __name__ == "__main__":
     trainer.train(train_loader, val_loader, training_config.epochs)
 
     # Save the model
-    trainer.save_model(training_config.model_path)
+    trainer.save_model("last_model.pth")
 
     # Predict
     print("Predicting...")

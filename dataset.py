@@ -4,12 +4,12 @@ from pathlib import Path
 from typing import Tuple
 from torch import Tensor,mean, std
 from config import TrainingConfig
-
 class FVMNDataset(Dataset):
     def __init__(self, training_config:TrainingConfig, data_path:Path=None, start_time:float=None, 
                  end_time:float=None, time_step:float=None, vars_list:list=None):
         '''
-        Keep in mind:
+        Keep in mind
+        ------------
         1. To prepare for the training data, we must have numpy files from start_time to end_time mentioned here.
         Example: 
         start_time = 0, end_time=5, then we must have numpy files from 0 to 5.
@@ -26,17 +26,20 @@ class FVMNDataset(Dataset):
         input_shape from 0 to 4: [(grid_x-2) * (grid_y-2) * 5, 15]
         label_shape from 1 to 5: [(grid_x-2) * (grid_y-2) * 5, 3]
 
-        Note:
-        vars_list: list containing the variables to be predicted. If None, it will be taken from the training_config.
-                    here, we should be careful that we are not extending the dimensions of variables like U_x, U_y, U_z (we did while creating the network).
-            example: ["U", "T"]
+        Note
+        ----
+        vars_list: 
+            list containing the variables to be predicted. If None, it will be taken from the training_config.
+            Here, we should be careful that we are not extending the dimensions of variables like
+            U_x, U_y, U_z (we did while creating the network).
+            Example: ["U", "T"]
         '''
         super().__init__()
         self.training_config = training_config
         self.start_time = self.training_config.training_start_time if not start_time else start_time
         self.end_time = self.training_config.training_end_time if not end_time else end_time
         self.vars: list = self.training_config.extend_variables() if not vars_list else vars_list
-        self.time_step = self.training_config.time_step if not time_step else time_step   
+        self.time_step = self.training_config.write_interval if not time_step else time_step   
 
         self.grid_x = self.training_config.grid_x
         self.grid_y = self.training_config.grid_y
@@ -44,7 +47,7 @@ class FVMNDataset(Dataset):
 
         # First thing first, we must ensure that we have the data from start_time to end_time
         # in the data_path directory.
-        self.data_path = self.training_config.data_path if not data_path else Path(data_path)
+        self.data_path = self.training_config.assets_path if not data_path else Path(data_path)
         assert self.data_path.exists(), f"Data path: {self.data_path} doesn't exist."
         assert self._is_present(), f"Data is missing in the directory: {self.data_path}.\n\
                                     You must have data from {start_time} to {end_time} for variables: {self.vars}" 
@@ -56,12 +59,38 @@ class FVMNDataset(Dataset):
     def _is_present(self) -> bool:
         for var in self.vars:
             for time in np.arange(self.start_time, self.end_time+self.time_step, self.time_step):
-                if not (self.data_path / f"{var}_{time}.npy").exists():
+                if not (self.data_path / f"{var}_{round(time, self.training_config.round_to)}.npy").exists():
                     return False
         return True
     
     @staticmethod
     def parse_numpy(training_config:TrainingConfig, data_path:Path) -> np.ndarray:
+        '''
+        This function is used to parse the numpy files.
+        1. If the data is VECTOR, split the data into x, y, z components.
+        2. If the data is SCALAR, keep the data as it is.
+        3. Reshape the data into shapes defined in training_config: grid_x, grid_y
+           using C-order i.e row-major order because OpenFOAM stores the data in row-major order.
+
+        Args
+        ----
+        training_config: TrainingConfig
+            The training configuration object.
+        data_path: Path
+            The full path to the numpy file.
+
+        Returns
+        -------
+        parsed_data: np.ndarray
+        - If the data is VECTOR, it will return [grid_y, grid_x, 2] shape.
+        - If the data is SCALAR, it will return [grid_y, grid_x] shape.
+
+        Example
+        -------
+        Let's say we have saved data from OpenFOAM to numpy as U_1.npy,\n
+        and it is two-dimensional data with grid_x=200, grid_y=200.\n
+        This function will return [200, 200, 2] shape.
+        '''
 
         grid_x = training_config.grid_x
         grid_y = training_config.grid_y
@@ -92,6 +121,27 @@ class FVMNDataset(Dataset):
 
     @staticmethod
     def add_feature(input_matrix:np.ndarray) -> np.ndarray:
+        '''
+        This function is used to add correlated features to the data.
+                  |        |
+                  | (x-1,y)|                 
+        ----------|--------|---------      
+         (x,y-1)  |  (x,y) | (x,y+1)   ---> [(x,y), (x-1,y), (x+1,y), (x,y-1), (x,y+1)]
+        ----------|--------|---------
+                  |(x-1,y) | 
+                  |        |
+                     
+        Args
+        ----
+        input_matrix: np.ndarray
+            The input data matrix. Example Shape: [200,200]
+
+        Returns
+        -------
+        correlated_features: np.ndarray
+            The correlated features. Example Shape: [39204, 5]
+
+        '''
         window_shape = (3, 3)
         sliding_window = np.lib.stride_tricks.sliding_window_view(input_matrix, window_shape)
         x,y = window_shape[0] // 2, window_shape[1] // 2 
@@ -101,7 +151,7 @@ class FVMNDataset(Dataset):
             sliding_window[:,:,x+1,y],
             sliding_window[:,:,x,y-1],
             sliding_window[:,:,x,y+1]
-        ], axis=-1)
+        ], axis=1)
         return correlated_features.reshape(-1, 5)
     
     def _prepare_input(self, time) -> np.ndarray:
@@ -109,13 +159,16 @@ class FVMNDataset(Dataset):
         Regarding the order of the variables in input data, two things matter: 
         1. The list of variables in the config file: "data_vars"
         2. The dimension of the data: 1D, 2D, 3D defined in the config file as "data_dim"
-        Example: 
+
+        Example
+        -------
         1. If data_vars = ["U", "T"] and data_dim = 2, then the order of the variables in the input data will be: 
             U_x, U_y, T
         2. If data_vars = ["T", "U"] and data_dim = 3, then the order of the variables in the input data will be:
             T, U_x, U_y, U_z
 
-        Functionality:
+        Functionality
+        -------------
         1. Load the numpy files from the data_path directory. [U_0.npy, T_0.npy]
         2. Parse the numpy files.
            a. If the data is VECTOR, split the data into x, y, z components. From this function: we get [200,200,2] shape.
@@ -151,31 +204,50 @@ class FVMNDataset(Dataset):
         5 - 4: 5th label
         '''
         data_t = self._prepare_input(time)
-        data_t_next = self._prepare_input(time + self.time_step)
+        data_t_next = self._prepare_input(round(time + self.time_step, self.training_config.round_to))
         return data_t_next[:,::5] - data_t[:,::5]
     
     @staticmethod
-    def normalize(data) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def normalize(data) -> Tuple[Tensor, float, float]:
+        '''
+        Args
+        ----
+        data: np.ndarray
+            The data to be normalized.
+
+        Returns
+        -------
+        normalized_data: Tensor
+            The normalized data.
+        mean: float
+            The mean of the data.
+        std: float
+            The standard deviation of the data.
+        '''
+        if isinstance(data, Tensor):
+            data = data.cpu().numpy()
         mean = np.mean(data, axis=0)
         std = np.std(data, axis=0)
         normalized_data = (data - mean)/std
-        return normalized_data
+        return Tensor(normalized_data), mean, std
     
     @staticmethod
-    def denormalize(data:Tensor)->Tensor:
-        mean_ = mean(data, axis=0)
-        std_ = std(data, axis=0)
-        return (data * std_) + mean_
+    def denormalize(data:Tensor, mean_, std_)->Tensor:
+        if data.shape[-1] == len(mean_):
+            return data * std_ + mean_
+        else:
+            skip_steps = len(mean_) // data.shape[-1]
+            return data * std_[::skip_steps] + mean_[::skip_steps]
     
-    def _prepare_inputs_and_labels(self) -> Tuple[np.ndarray, np.ndarray]:
+    def _prepare_inputs_and_labels(self) -> Tuple[Tensor, Tensor]:
         inputs, labels = [], []
         for time in np.round(np.arange(self.start_time, self.end_time, self.time_step),2):
             inputs.append(self._prepare_input(time))
             labels.append(self._calculate_difference(time))
         inputs = np.concatenate(inputs, axis=0)
         labels = np.concatenate(labels, axis=0)
-        normalized_inputs = self.normalize(inputs)
-        normalized_labels = self.normalize(labels)
+        normalized_inputs,*_ = self.normalize(inputs)
+        normalized_labels,*_ = self.normalize(labels)
 
         #TODO: hardcoded because this is what done in the original paper. Try to find a better way.
         final_input = np.concatenate((normalized_inputs,inputs[:, 0:1], inputs[:, 5:6], inputs[:, 10:11]), axis=1)
@@ -189,16 +261,12 @@ class FVMNDataset(Dataset):
     def __getitem__(self, idx):
         return self.inputs[idx], self.labels[idx]
     
-
-
 if __name__ == "__main__":
     training_config = TrainingConfig()
-    data_path = Path("./Assets/natural_convection")
+    data_path = training_config.assets_path
     start_time = 5.0
     end_time = 5.02
     time_step = 0.01
     data = FVMNDataset(training_config,data_path, start_time, end_time, time_step)
     inputs , labels = data._prepare_inputs_and_labels()
     print(inputs.shape, labels.shape, len(data))
-
-    

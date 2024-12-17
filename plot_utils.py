@@ -6,6 +6,72 @@ import warnings
 import imageio
 from typing import Dict
 
+warning_string = '''\n
+Data dimension mismatch: 
+	Variable shape: {}
+	Expected data dimension: {}
+Please update the data_dim parameter in the config file if you want to visualize \
+all the dimensions of the data.\n'''
+
+AXIS_LIST = ["x","y","z"]
+
+def flip_and_reshape(data:np.ndarray,nx:int,ny:int) -> np.ndarray:
+	'''
+	This function is used to flip the data and reshape it to the desired shape.
+	Order="C" is used because OpenFOAM stores the data in row-major order.
+	We are flipping the data because numpy writes the data in the first row first which is different from OpenFOAM.
+	'''
+	return np.flipud(data.reshape(ny,nx,order="C"))
+
+def process_variable(data_dict:Dict[str, np.ndarray], 
+					 var:str, data_dim:int, nx:int, ny:int) -> Dict[str, np.ndarray]:
+	'''
+	This function is used to process the variable data.
+
+	Args
+	----
+	data_dict: Dict[str, np.ndarray]
+		The dictionary containing the variable data.
+		Example: {"T": np.ndarray[40000,], "U": np.ndarray[40000,2]}
+	var: str
+		The variable name. e.g. "T", "U"
+	data_dim: int
+		The data dimension. e.g. 1 or 2
+	nx: int
+		The number of grid points in the x-direction.
+	ny: int
+		The number of grid points in the y-direction.
+
+	Returns
+	-------
+	data_dict: Dict[str, np.ndarray]
+		The dictionary containing the processed variable data.
+		Example: {"T": np.ndarray[200,200], "U_x": np.ndarray[200,200], "U_y": np.ndarray[200,200]}
+	'''
+	shape_of_variable = data_dict[var].shape
+	last_dim = shape_of_variable[-1] if len(shape_of_variable) >= 2 else None
+
+	match len(shape_of_variable):
+		case 2:
+			if last_dim != data_dim: 
+				warnings.warn(warning_string.format(shape_of_variable, data_dim))
+
+			if last_dim == 1:
+				# Single-dimensional data
+				data_dict[var] = flip_and_reshape(data_dict[var],nx,ny)
+			else:
+				# Multi-dimensional data
+				for i in range(min(data_dim, len(AXIS_LIST))):
+					data_dict[f"{var}_{AXIS_LIST[i]}"] = flip_and_reshape(data_dict[var][:,i],nx,ny)
+				del data_dict[var]
+		case 1:
+			# Single-dimensional data
+			data_dict[var] = flip_and_reshape(data_dict[var],nx,ny)
+		
+		case _:
+			raise ValueError(f"Data dimension mismatch. Expected 1 or 2 but got {data_dict[var].shape}")
+	return data_dict
+
 def visualize_output(base_config:BaseConfig,
 					timestamp:int|float,
 					np_data_dir:Path = None, 
@@ -65,18 +131,8 @@ def visualize_output(base_config:BaseConfig,
 	for var in data_vars:
 		numpy_file_name = f"{var}_{timestamp}.npy" if is_ground_truth else f"{var}_{timestamp}_predicted.npy"
 		data_dict[var] = np.load(np_data_dir / numpy_file_name)
-		shape_of_variable = data_dict[var].shape
-		if len(shape_of_variable) == 2:
-			if shape_of_variable[-1] != data_dim: warnings.warn(f"Data dimension mismatch. Expected {data_dim} but got {data_dict[var].shape[-1]}. PLEASE CHECK!")
-			for i in range(shape_of_variable[-1]): # Be sure to change the data_dim parameter if you have dimension other than 2: even if it is 3D if data_dim is 2, it will visualize for x and y only.
-				axis_list = ["x","y","z"]
-				data_dict[f"{var}_{axis_list[i]}"] = np.flipud(data_dict[var][:,i].reshape(ny,nx,order="C"))
-			del data_dict[var]
-		elif len(shape_of_variable) > 2:	
-			raise ValueError(f"Data dimension mismatch. Expected 1 or 2 but got {data_dict[var].shape}")
-		else:
-			data_dict[var] = np.flipud(data_dict[var].reshape(ny,nx,order="C"))
-	
+		data_dict = process_variable(data_dict, var, data_dim, nx, ny)
+		
 	num_subplots = len(data_dict)
 	fig, ax = plt.subplots(1, num_subplots, figsize=(5*num_subplots, 5))
 	for i,(key,value) in enumerate(data_dict.items()):
@@ -126,14 +182,12 @@ def make_animation(base_config:BaseConfig,
 if __name__ == "__main__":
 
 	base_config = BaseConfig()
-	# time_list = [10.0,10.01,10.02,10.03]
+	time_list = [round(i,2) for i in np.arange(10.05,10.3,0.01)]
 	# make_animation(base_config=base_config,
 	# 				timestamps=time_list,
-	# 				is_ground_truth=True)
+	# 				is_ground_truth=True,
+	# 				set_fps=1,
+	# 				save_name="test_output")
 	visualize_output(base_config=base_config,
 					timestamp=10.03,
 					is_ground_truth=True)
-	make_animation(base_config=base_config,
-					timestamps=[10.0,10.01,10.02,10.03],
-					is_ground_truth=True,
-					save_name="natural_convection")

@@ -1,14 +1,20 @@
-from torch.utils.data import Dataset
-import numpy as np
 from pathlib import Path
 from typing import Tuple
+import json
+
+from torch.utils.data import Dataset
+import numpy as np
 from torch import Tensor,mean, std
+
 from config import TrainingConfig
 
+<<<<<<< HEAD
 data_missing_error ='''
 Data is missing in the directory: {} 
 You must have data from {} to {} for variables: {}"
 '''
+=======
+>>>>>>> f7bc1ae (finalized repit)
 class FVMNDataset(Dataset):
     def __init__(self, training_config:TrainingConfig, data_path:Path=None, start_time:float=None, 
                  end_time:float=None, time_step:float=None, vars_list:list=None):
@@ -54,7 +60,13 @@ class FVMNDataset(Dataset):
         # in the data_path directory.
         self.data_path = self.training_config.assets_path if not data_path else Path(data_path)
         assert self.data_path.exists(), f"Data path: {self.data_path} doesn't exist."
+<<<<<<< HEAD
         assert self._is_present(), data_missing_error.format(self.data_path, start_time, end_time, self.vars) 
+=======
+        assert self._is_present(), \
+            f"\nData is missing in the directory: {self.data_path}:\n" + \
+            f"You must have data from {start_time} to {end_time} for variables: {self.vars}. Example: {self.vars[0]}_{start_time}.npy"
+>>>>>>> f7bc1ae (finalized repit)
         assert self.start_time != 0, "Start time can't be zero. We don't have functionality to implement initial condition in the dataset."     
         ############ ----------------------------------------------############
         # Preprocess inputs and labels:
@@ -99,6 +111,7 @@ class FVMNDataset(Dataset):
         grid_x = training_config.grid_x
         grid_y = training_config.grid_y
         data:np.ndarray = np.load(data_path)
+<<<<<<< HEAD
         if len(data.shape) == 2: # (40000, 3): when get from OpenFOAM. VECTOR data
             assert data.shape[0] == grid_x * grid_y, "check data shape and grid size mentioned in config."
             if training_config.data_dim == 1: # 1D
@@ -119,6 +132,33 @@ class FVMNDataset(Dataset):
             raise NotImplementedError("Till now, we have not come across this use case.")
         else: # SCALAR data
             return data.reshape(grid_y, grid_x, order="C")
+=======
+        assert data.shape[0] == grid_x * grid_y, "check data shape and grid size mentioned in config"
+        match len(data.shape):
+            case 2: # (40000, 3): when get from OpenFOAM. VECTOR data
+                if training_config.data_dim == 1: # 1D
+                    assert data.shape[-1] >= 1, "Check the data shape. Dimensions should be >= 1."
+                    return data[:,0].reshape(grid_x, grid_y, order="F")
+                elif training_config.data_dim == 2: #2D
+                    assert data.shape[-1] >= 2, "Check the data shape. Dimensions should be >= 2."
+                    # Check: https://github.com/JBNU-NINE/repit_container/blob/main/repit_wiki/Data-Loader-for-FVMN.md
+                    x_data = data[:,0].reshape(grid_x, grid_y, order="F")
+                    y_data = data[:,1].reshape(grid_x, grid_y, order="F")
+                    return np.stack([x_data, y_data], axis=-1)
+                elif training_config.data_dim == 3: #3D
+
+                    assert data.shape[-1] == 3, "Check the data shape. Dimensions should be 3."
+                    x_data = data[:,0].reshape(grid_x, grid_y, order="F")
+                    y_data = data[:,1].reshape(grid_x, grid_y, order="F")
+                    z_data = data[:,2].reshape(grid_x, grid_y, order="F")
+                    return np.stack([x_data, y_data, z_data], axis=-1)
+                else: # Beyond 3D
+                    raise NotImplementedError("This framework doesn't support beyond 3D.")
+            case 1: # SCALAR data
+                return data.reshape(grid_x, grid_y, order="F")
+            case _:
+                raise NotImplementedError("Till now, we have not come across this use case.")
+>>>>>>> f7bc1ae (finalized repit)
         
     def _add_zero_padding(self, data:np.ndarray) -> np.ndarray:
         return np.pad(data, 1, mode="constant", constant_values=0)
@@ -155,8 +195,8 @@ class FVMNDataset(Dataset):
             sliding_window[:,:,x+1,y],
             sliding_window[:,:,x,y-1],
             sliding_window[:,:,x,y+1]
-        ], axis=1)
-        return correlated_features.reshape(-1, 5)
+        ], axis=-1)
+        return correlated_features.reshape(-1, 5, order="F")
     
     def _prepare_input(self, time) -> np.ndarray:
         '''
@@ -214,6 +254,7 @@ class FVMNDataset(Dataset):
     @staticmethod
     def normalize(data) -> Tuple[Tensor, float, float]:
         '''
+        Normalize the data.
         Args
         ----
         data: np.ndarray
@@ -250,15 +291,18 @@ class FVMNDataset(Dataset):
             labels.append(self._calculate_difference(time))
         inputs = np.concatenate(inputs, axis=0)
         labels = np.concatenate(labels, axis=0)
-        normalized_inputs,*_ = self.normalize(inputs)
-        normalized_labels,*_ = self.normalize(labels)
+        normalized_inputs,input_MEAN, input_STD = self.normalize(inputs)
+        normalized_labels,label_MEAN, label_STD = self.normalize(labels)
 
-        #TODO: hardcoded because this is what done in the original paper. Try to find a better way.
-        final_input = np.concatenate((normalized_inputs,inputs[:, 0:1], inputs[:, 5:6], inputs[:, 10:11]), axis=1)
-        # looking into the original code, it doesn't seem necessary to concatenate the original data with the normalized data.
+        # Saving the mean and std for denormalization while predicting.
+        metrics_save_path = "denorm_metrics.json"
+        # While preparing for new inputs and labels, if this file already exists, it will be overwritten.
+        with open(metrics_save_path, "w") as f:
+            json.dump({"input_MEAN": input_MEAN.tolist(), "input_STD": input_STD.tolist(), 
+                       "label_MEAN": label_MEAN.tolist(), "label_STD": label_STD.tolist()}, f, indent=4)
 
         return Tensor(normalized_inputs), Tensor(normalized_labels)
-        
+    
     def __len__(self):
         return self.inputs.shape[0]
     
@@ -269,7 +313,11 @@ if __name__ == "__main__":
     training_config = TrainingConfig()
     data_path = training_config.assets_path
     start_time = 10.0
+<<<<<<< HEAD
     end_time = 10.03
+=======
+    end_time = 10.02
+>>>>>>> f7bc1ae (finalized repit)
     time_step = 0.01
     data = FVMNDataset(training_config,data_path, start_time, end_time, time_step)
     inputs , labels = data._prepare_inputs_and_labels()

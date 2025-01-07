@@ -176,7 +176,7 @@ def make_animation(base_config:BaseConfig,
 											data_vars=data_vars,
 											mode="rgb_array",
 											is_ground_truth=is_ground_truth))
-	imageio.mimsave(save_path, images_list, fps=set_fps)
+	imageio.mimsave(save_path, images_list, fps=set_fps, loop=0)
 	return True
 
 if __name__ == "__main__":

@@ -1,9 +1,13 @@
 from dataclasses import dataclass
+import json
+from collections import defaultdict
 from pathlib import Path
-import torch.cuda as cuda
-import torch
 import logging
 from datetime import datetime
+
+import torch.cuda as cuda
+import torch
+
 @dataclass
 class BaseConfig:
 	# Data parameters
@@ -128,9 +132,26 @@ class TrainingConfig(BaseConfig):
 		self.model_path = Path("./model.pth")
 
 		self.training_start_time = 10.0
-		self.training_end_time = 10.03
-		self.prediction_start_time = 10.03
+		self.training_end_time = 10.02
+		self.prediction_start_time = 10.02
 		self.prediction_end_time = 10.05
+		self.residual_threshold:float = 5.0 
+
+	def log_metrics(self, key:str, value:int|float, metrics_type:str="prediction"):
+		logging_path = Path(f"./{metrics_type}_metrics.json")
+
+		data = defaultdict(list)
+		if logging_path.exists():
+			try:
+				with open(logging_path, "r") as f:
+					data.update(json.load(f))
+			except json.JSONDecodeError:
+				pass
+
+		data[key].append(value)	
+		
+		with open(logging_path, "w") as f:
+			json.dump(data, f, indent=4)
 	
 if __name__ == "__main__":
 	training_config = TrainingConfig()

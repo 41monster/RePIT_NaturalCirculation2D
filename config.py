@@ -131,6 +131,7 @@ class TrainingConfig(BaseConfig):
 		self.activation = torch.nn.ReLU
 		self.model_path = Path("./model.pth")
 
+
 		self.training_start_time = 10.0
 		self.training_end_time = 10.02
 		self.prediction_start_time = 10.02

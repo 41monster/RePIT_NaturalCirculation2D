@@ -8,13 +8,6 @@ from torch import Tensor,mean, std
 
 from config import TrainingConfig
 
-<<<<<<< HEAD
-data_missing_error ='''
-Data is missing in the directory: {} 
-You must have data from {} to {} for variables: {}"
-'''
-=======
->>>>>>> f7bc1ae (finalized repit)
 class FVMNDataset(Dataset):
     def __init__(self, training_config:TrainingConfig, data_path:Path=None, start_time:float=None, 
                  end_time:float=None, time_step:float=None, vars_list:list=None):
@@ -60,13 +53,9 @@ class FVMNDataset(Dataset):
         # in the data_path directory.
         self.data_path = self.training_config.assets_path if not data_path else Path(data_path)
         assert self.data_path.exists(), f"Data path: {self.data_path} doesn't exist."
-<<<<<<< HEAD
-        assert self._is_present(), data_missing_error.format(self.data_path, start_time, end_time, self.vars) 
-=======
         assert self._is_present(), \
             f"\nData is missing in the directory: {self.data_path}:\n" + \
             f"You must have data from {start_time} to {end_time} for variables: {self.vars}. Example: {self.vars[0]}_{start_time}.npy"
->>>>>>> f7bc1ae (finalized repit)
         assert self.start_time != 0, "Start time can't be zero. We don't have functionality to implement initial condition in the dataset."     
         ############ ----------------------------------------------############
         # Preprocess inputs and labels:
@@ -111,28 +100,6 @@ class FVMNDataset(Dataset):
         grid_x = training_config.grid_x
         grid_y = training_config.grid_y
         data:np.ndarray = np.load(data_path)
-<<<<<<< HEAD
-        if len(data.shape) == 2: # (40000, 3): when get from OpenFOAM. VECTOR data
-            assert data.shape[0] == grid_x * grid_y, "check data shape and grid size mentioned in config."
-            if training_config.data_dim == 1: # 1D
-                return data[:,0].reshape(grid_y, grid_x, order="C")
-            elif training_config.data_dim == 2: #2D
-                # Why order="F"? Check: https://github.com/JBNU-NINE/repit_container/blob/main/repit_wiki/Data-Loader-for-FVMN.md
-                x_data = data[:,0].reshape(grid_y, grid_x, order="C")
-                y_data = data[:,1].reshape(grid_y, grid_x, order="C")
-                return np.stack([x_data, y_data], axis=-1)
-            elif training_config.data_dim == 3: #3D
-                x_data = data[:,0].reshape(grid_y, grid_x, order="C")
-                y_data = data[:,1].reshape(grid_y, grid_x, order="C")
-                z_data = data[:,2].reshape(grid_y, grid_x, order="C")
-                return np.stack([x_data, y_data, z_data], axis=-1)
-            else: # Beyond 3D
-                raise NotImplementedError("This framework doesn't support beyond 3D.")
-        elif len(data.shape) > 2:
-            raise NotImplementedError("Till now, we have not come across this use case.")
-        else: # SCALAR data
-            return data.reshape(grid_y, grid_x, order="C")
-=======
         assert data.shape[0] == grid_x * grid_y, "check data shape and grid size mentioned in config"
         match len(data.shape):
             case 2: # (40000, 3): when get from OpenFOAM. VECTOR data
@@ -158,7 +125,6 @@ class FVMNDataset(Dataset):
                 return data.reshape(grid_x, grid_y, order="F")
             case _:
                 raise NotImplementedError("Till now, we have not come across this use case.")
->>>>>>> f7bc1ae (finalized repit)
         
     def _add_zero_padding(self, data:np.ndarray) -> np.ndarray:
         return np.pad(data, 1, mode="constant", constant_values=0)
@@ -313,11 +279,7 @@ if __name__ == "__main__":
     training_config = TrainingConfig()
     data_path = training_config.assets_path
     start_time = 10.0
-<<<<<<< HEAD
-    end_time = 10.03
-=======
     end_time = 10.02
->>>>>>> f7bc1ae (finalized repit)
     time_step = 0.01
     data = FVMNDataset(training_config,data_path, start_time, end_time, time_step)
     inputs , labels = data._prepare_inputs_and_labels()
